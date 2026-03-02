@@ -186,6 +186,7 @@ def decode_jwt_payload(token: str):
 
 
 def generate_password(length=14):
+    """生成一个随机密码"""
     lower = string.ascii_lowercase
     upper = string.ascii_uppercase
     digits = string.digits
@@ -223,20 +224,20 @@ def random_birthdate():
 
 # Backwards-compatible sentinel helpers
 try:
-    from codex import protocol_keygen as _protocol_keygen
+    from codex.sentinel import build_sentinel_token as _build_sentinel_token_impl
+    from codex.sentinel import fetch_sentinel_challenge as _fetch_sentinel_challenge_impl
 
     def fetch_sentinel_challenge(session, device_id, flow="authorize_continue"):
-        """兼容包装：调用 codex.protocol_keygen.fetch_sentinel_challenge"""
-        return _protocol_keygen.fetch_sentinel_challenge(session, device_id, flow=flow)
+        """向后兼容的 shim：委托给 codex.sentinel.fetch_sentinel_challenge"""
+        return _fetch_sentinel_challenge_impl(session, device_id, flow)
 
     def build_sentinel_token(session, device_id, flow, **kwargs):
-        """向后兼容的 shim：委托给 codex.protocol_keygen.build_sentinel_token"""
-        from codex.protocol_keygen import build_sentinel_token as _build_sentinel_token_impl
+        """向后兼容的 shim：委托给 codex.sentinel.build_sentinel_token"""
         return _build_sentinel_token_impl(session, device_id, flow, **kwargs)
 except Exception:
     # If import fails, provide stubs that raise clear error when used
     def fetch_sentinel_challenge(session, device_id, flow="authorize_continue"):
-        raise RuntimeError("codex.protocol_keygen not available: cannot fetch sentinel challenge")
+        raise RuntimeError("codex.sentinel not available: cannot fetch sentinel challenge")
 
-    def build_sentinel_token(session, device_id, flow="authorize_continue"):
-        raise RuntimeError("codex.protocol_keygen not available: cannot build sentinel token")
+    def build_sentinel_token(session, device_id, flow="authorize_continue", **kwargs):
+        raise RuntimeError("codex.sentinel not available: cannot build sentinel token")

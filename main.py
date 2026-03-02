@@ -21,9 +21,9 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from urllib.parse import urlparse, parse_qs, urlencode
 
 from curl_cffi import requests as curl_requests
-from services.freemail import EmailService
 from core.config import _load_config, as_bool
 from app.registrar import ChatGPTRegister # 直接导入新的实现
+from core.logger import logger
 
 # Load configuration via core.config
 BASE_PATH = os.path.dirname(os.path.abspath(__file__))
@@ -32,6 +32,8 @@ DEFAULT_TOTAL_ACCOUNTS = _CONFIG["total_accounts"]
 DEFAULT_PROXY = _CONFIG["proxy"]
 DEFAULT_OUTPUT_FILE = _CONFIG["output_file"]
 ENABLE_OAUTH = as_bool(_CONFIG.get("enable_oauth", True))
+LOG_LEVEL = _CONFIG.get("log_level", "info")
+logger.set_level(LOG_LEVEL)
 OAUTH_REQUIRED = as_bool(_CONFIG.get("oauth_required", True))
 OAUTH_ISSUER = _CONFIG["oauth_issuer"].rstrip("/")
 OAUTH_CLIENT_ID = _CONFIG["oauth_client_id"]
@@ -123,7 +125,10 @@ def _save_codex_tokens(email, tokens, token_json_dir, ak_file, rk_file):
 
 # expose sentinel helpers under original names for backward compatibility
 fetch_sentinel_challenge = fetch_sentinel_challenge_impl
-build_sentinel_token = build_sentinel_token_impl
+
+def build_sentinel_token(session, device_id, flow, **kwargs):
+    """向后兼容的 shim：委托给 core.utils.build_sentinel_token"""
+    return build_sentinel_token_impl(session, device_id, flow, **kwargs)
 
 
 # ================= 临时邮箱（freemail-only） =================
@@ -131,7 +136,7 @@ build_sentinel_token = build_sentinel_token_impl
 def create_temp_email():
     """创建临时邮箱，委托给 core.emailing.create_temp_email（仅使用 freemail）。
 
-    返回 (email, password, mail_token)。对于 freemail，password 为空，mail_token 为 mailbox/id。
+    返回 (email, mail_token)。
     """
     user_agent = None
     try:
@@ -139,9 +144,10 @@ def create_temp_email():
     except Exception:
         user_agent = None
     # DUCKMAIL 参数已移除 — 传入 None 以兼容 core.emailing 的签名
-    return _create_temp_email_impl(
+    email, mail_token = _create_temp_email_impl(
         None, None, DEFAULT_PROXY, FREEMAIL_WORKER_DOMAIN, FREEMAIL_TOKEN, user_agent=user_agent
     )
+    return email, mail_token
 
 
 def _extract_verification_code(email_content: str):
@@ -208,11 +214,7 @@ def _random_birthdate():
     return f"{y}-{m:02d}-{d:02d}"
 
 
-# 旧的 ChatGPTRegister 类定义已被完全迁移并移除
-# 现在所有对此模块的导入将直接使用 app.registrar.ChatGPTRegister
-
-
-# ==================== 并发批量注册 (迁移至 app/runner.py & app/cli.py) ====================
+# ==================== 并发批量注册 ====================
 
 def run_batch(total_accounts: int = 3, output_file="registered_accounts.txt",
               max_workers: int = 3, proxy=None):

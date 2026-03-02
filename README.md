@@ -1,6 +1,6 @@
 # ChatGPT 批量自动注册工具
 
-> 使用 freemail 工作器创建临时邮箱，并发自动注册 ChatGPT 账号
+> 使用 [freemail](https://github.com/idinging/freemail) 创建临时邮箱，并发自动注册 ChatGPT 账号
 
 ## 功能
 
@@ -14,9 +14,10 @@
 ## 环境
 
 ```bash
-pip install curl_cffi
+uv venv --python 3.12
+uv pip install -r requirements.txt
 ```
-
+然后确保你有 [freemail](https://github.com/idinging/freemail) 服务（如果没有，请先部署一个） 
 ## 配置 (config.json)
 
 ```json
@@ -43,7 +44,7 @@ pip install curl_cffi
 | ak_file | Access Key 文件 |
 | rk_file | Refresh Key 文件 |
 
-## CPA 面板集成
+## CPA 面板集成 (TODO)
 
 注册完成后，可以自动上传账号到 CPA 面板：
 
@@ -52,36 +53,54 @@ pip install curl_cffi
 | upload_api_url | CPA 面板上传 API 地址 | https://help.router-for.me/cn/ |
 | upload_api_token | CPA 面板登录密码 | 你的 CPA 面板密码 |
 
-> CPA 面板仓库: https://github.com/dongshuyan/CPA-Dashboard
+> CPA 面板仓库:  [CPA-Dashboard](https://github.com/dongshuyan/CPA-Dashboard)
 
 ## 使用
 
 ```bash
-python chatgpt_register.py
+uv run main.py
 ```
 
 ## 输出
 
-注册成功的账号会保存到 `registered_accounts.txt`
+注册成功的账号会保存到 `output/[时间戳]-[数量]/accounts.txt`
 
 ## 目录结构
 
 ```
 chatgpt_register/
-├── chatgpt_register.py    # 主程序
+├── main.py                 # 主程序入口
+├── app/                    # 应用逻辑
+│   ├── cli.py              # 命令行交互
+│   ├── registrar.py        # 单次注册流程
+│   └── runner.py           # 并发任务调度
+├── core/                   # 核心工具
+│   ├── config.py           # 配置加载
+│   ├── emailing.py         # 邮箱服务适配
+│   ├── logger.py           # 日志模块
+│   └── utils.py            # 通用工具
+├── codex/                  # Codex 协议工具
+│   ├── codex.py
+│   ├── oauth.py
+│   ├── registrar.py
+│   ├── sentinel.py
+│   ├── utils.py
+│   └── README.md
+├── output/                 # 输出目录
+│   └── [时间戳]-[数量]/
+│       ├── registered_accounts.txt
+│       ├── ak.txt
+│       ├── rk.txt
+│       └── codex_tokens/
 ├── config.json             # 配置文件
-├── README.md               # 本文档
-├── codex/                  # Codex 协议密钥生成
-│   ├── config.json
-│   └── protocol_keygen.py
-├── registered_accounts.txt # 输出的账号
-├── ak.txt                  # Access Keys
-└── rk.txt                 # Refresh Keys
+├── config.json.example     # 配置示例
+├── requirements.txt        # 依赖列表
+├── upload.py               # 可选：上传/集成脚本
+└── README.md               # 本文档
 ```
 
 ## 注意事项
 
-- 需要有效的代理才能注册成功
-* freemail 工作器信息由你或服务提供方提供
+- 别忘了 [freemail](https://github.com/idinging/freemail) 
 - 建议使用代理避免 IP 被封
 - 使用 CPA 面板需要先部署面板服务

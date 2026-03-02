@@ -1,16 +1,18 @@
 {
   "_comment": "ChatGPT(freemail)",
 
-  "total_accounts": 5,
+  "total_accounts": 12,
+  "concurrent_workers": 4,
 
-  "freemail_worker_domain": "",
-  "freemail_token": "",
+  "freemail_worker_domain": "your.freemail.domain",
+  "freemail_token": "your_freemail_JWT_token",
 
-  "proxy": "",
+  "proxy": "http://127.0.0.1:7890",
 
-  "output_file": "registered_accounts.txt",
+  "output_file": "accounts.txt",
+  "log_level": "info",
+
   "enable_oauth": true,
-  "oauth_required": true,
   "oauth_issuer": "https://auth.openai.com",
   "oauth_client_id": "app_EMoamEEZ73f0CkXaXp7hrann",
   "oauth_redirect_uri": "http://localhost:1455/auth/callback",
@@ -18,5 +20,5 @@
   "rk_file": "rk.txt",
   "token_json_dir": "codex_tokens",
   "upload_api_url": "http://localhost:8317/v0/management/auth-files",
-  "upload_api_token": "你的cpa面板登录密码"
+  "upload_api_token": "your_cpa_dashboard_password"
 }

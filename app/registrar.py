@@ -12,9 +12,10 @@ from curl_cffi import requests as curl_requests
 
 # 延迟导入或从 core 导入，以避免循环依赖
 from core.utils import random_chrome_version as _random_chrome_version_impl
+from core.logger import logger
 
 # 全局锁应从主模块或 app context 传入，此处暂时留空
-# from chatgpt_register import _print_lock
+# from main import _print_lock
 
 
 class ChatGPTRegister:
@@ -50,71 +51,28 @@ class ChatGPTRegister:
         self._callback_url = None
 
     def _log(self, step, method, url, status, body=None):
-        # 依赖 _print_lock，需要从外部注入或在 app context 中定义
-        from chatgpt_register import _print_lock
-        prefix = f"[{self.tag}] " if self.tag else ""
-        lines = [
-            f"\n{'='*60}",
-            f"{prefix}[Step] {step}",
-            f"{prefix}[{method}] {url}",
-            f"{prefix}[Status] {status}",
-        ]
-        if body:
-            try:
-                lines.append(f"{prefix}[Response] {json.dumps(body, indent=2, ensure_ascii=False)[:1000]}")
-            except Exception:
-                lines.append(f"{prefix}[Response] {str(body)[:1000]}")
-        lines.append(f"{'='*60}")
-        with _print_lock:
-            print("\n".join(lines))
+        logger.log_http(step, method, url, status, body, tag=self.tag)
 
     def _print(self, msg):
-        # 依赖 _print_lock
-        from chatgpt_register import _print_lock
-        prefix = f"[{self.tag}] " if self.tag else ""
-        with _print_lock:
-            print(f"{prefix}{msg}")
+        logger.debug(msg, tag=self.tag)
 
     # 临时邮箱（仅使用 freemail）
     def create_temp_email(self):
         """创建临时邮箱，委托给模块级 create_temp_email（仅使用 freemail）。"""
         # 依赖顶层函数，需要从原模块导入
-        from chatgpt_register import create_temp_email
+        from main import create_temp_email
         return create_temp_email()
-
-    def _extract_verification_code(self, email_content: str):
-        """从邮件内容提取 6 位验证码"""
-        if not email_content:
-            return None
-
-        patterns = [
-            r"Verification code:?\s*(\d{6})",
-            r"code is\s*(\d{6})",
-            r"代码为[:：]?\s*(\d{6})",
-            r"验证码[:：]?\s*(\d{6})",
-            r">\s*(\d{6})\s*<",
-            r"(?<![#&])\b(\d{6})\b",
-        ]
-
-        for pattern in patterns:
-            import re
-            matches = re.findall(pattern, email_content, re.IGNORECASE)
-            for code in matches:
-                if code == "177010":  # 已知误判
-                    continue
-                return code
-        return None
 
     def wait_for_verification_email(self, mail_token: str, timeout: int = 120):
         """等待并提取 OpenAI 验证码，委托给模块级 wait_for_verification_email。"""
-        self._print(f"[OTP] 等待验证码邮件 (最多 {timeout}s)...")
+        logger.info(f"等待验证码邮件 (最多 {timeout}s)...", tag=self.tag)
         # 依赖顶层函数
-        from chatgpt_register import wait_for_verification_email
+        from main import wait_for_verification_email
         code = wait_for_verification_email(mail_token, timeout)
         if code:
-            self._print(f"[OTP] 验证码: {code}")
+            logger.info(f"验证码: {code}", tag=self.tag)
             return code
-        self._print(f"[OTP] 超时 ({timeout}s)")
+        logger.info(f"超时 ({timeout}s)", tag=self.tag)
         return None
 
     # ==================== 注册流程 ====================
@@ -167,7 +125,7 @@ class ChatGPTRegister:
         return final_url
 
     def register(self, email: str, password: str):
-        from chatgpt_register import _make_trace_headers
+        from main import _make_trace_headers
         url = f"{self.AUTH}/api/accounts/user/register"
         headers = {"Content-Type": "application/json", "Accept": "application/json",
                     "Referer": f"{self.AUTH}/create-account/password", "Origin": self.AUTH}
@@ -190,7 +148,7 @@ class ChatGPTRegister:
         return r.status_code, data
 
     def validate_otp(self, code: str):
-        from chatgpt_register import _make_trace_headers
+        from main import _make_trace_headers
         url = f"{self.AUTH}/api/accounts/email-otp/validate"
         headers = {"Content-Type": "application/json", "Accept": "application/json",
                     "Referer": f"{self.AUTH}/email-verification", "Origin": self.AUTH}
@@ -202,7 +160,7 @@ class ChatGPTRegister:
         return r.status_code, data
 
     def create_account(self, name: str, birthdate: str):
-        from chatgpt_register import _make_trace_headers
+        from main import _make_trace_headers
         url = f"{self.AUTH}/api/accounts/create_account"
         headers = {"Content-Type": "application/json", "Accept": "application/json",
                     "Referer": f"{self.AUTH}/about-you", "Origin": self.AUTH}
@@ -234,7 +192,7 @@ class ChatGPTRegister:
 
     def run_register(self, email, password, name, birthdate, mail_token):
         from urllib.parse import urlparse
-        from chatgpt_register import _random_delay
+        from main import _random_delay
         """使用 freemail 的注册流程"""
         self.visit_homepage()
         _random_delay(0.3, 0.8)
@@ -247,12 +205,12 @@ class ChatGPTRegister:
         final_path = urlparse(final_url).path
         _random_delay(0.3, 0.8)
 
-        self._print(f"Authorize → {final_path}")
+        logger.info(f"Authorize → {final_path}", tag=self.tag)
 
         need_otp = False
 
         if "create-account/password" in final_path:
-            self._print("全新注册流程")
+            logger.info("全新注册流程", tag=self.tag)
             _random_delay(0.5, 1.0)
             status, data = self.register(email, password)
             if status != 200:
@@ -262,21 +220,21 @@ class ChatGPTRegister:
             self.send_otp()
             need_otp = True
         elif "email-verification" in final_path or "email-otp" in final_path:
-            self._print("跳到 OTP 验证阶段 (authorize 已触发 OTP，不再重复发送)")
+            logger.info("跳到 OTP 验证阶段 (authorize 已触发 OTP，不再重复发送)", tag=self.tag)
             # 不调用 send_otp()，因为 authorize 重定向到 email-verification 时服务器已发送 OTP
             need_otp = True
         elif "about-you" in final_path:
-            self._print("跳到填写信息阶段")
+            logger.info("跳到填写信息阶段", tag=self.tag)
             _random_delay(0.5, 1.0)
             self.create_account(name, birthdate)
             _random_delay(0.3, 0.5)
             self.callback()
             return True
         elif "callback" in final_path or "chatgpt.com" in final_url:
-            self._print("账号已完成注册")
+            logger.info("账号已完成注册", tag=self.tag)
             return True
         else:
-            self._print(f"未知跳转: {final_url}")
+            logger.info(f"未知跳转: {final_url}", tag=self.tag)
             self.register(email, password)
             self.send_otp()
             need_otp = True
@@ -290,7 +248,7 @@ class ChatGPTRegister:
             _random_delay(0.3, 0.8)
             status, data = self.validate_otp(otp_code)
             if status != 200:
-                self._print("验证码失败，重试...")
+                logger.info("验证码失败，重试...", tag=self.tag)
                 self.send_otp()
                 _random_delay(1.0, 2.0)
                 otp_code = self.wait_for_verification_email(mail_token, timeout=60)
@@ -354,7 +312,7 @@ class ChatGPTRegister:
         return None
 
     def _oauth_allow_redirect_extract_code(self, url: str, referer: str = None):
-        from chatgpt_register import _extract_code_from_url
+        from main import _extract_code_from_url
         import re
         headers = {
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
@@ -375,32 +333,32 @@ class ChatGPTRegister:
             final_url = str(resp.url)
             code = _extract_code_from_url(final_url)
             if code:
-                self._print("[OAuth] allow_redirect 命中最终 URL code")
+                logger.debug("allow_redirect 命中最终 URL code", tag="OAuth")
                 return code
 
             for r in getattr(resp, "history", []) or []:
                 loc = r.headers.get("Location", "")
                 code = _extract_code_from_url(loc)
                 if code:
-                    self._print("[OAuth] allow_redirect 命中 history Location code")
+                    logger.debug("allow_redirect 命中 history Location code", tag="OAuth")
                     return code
                 code = _extract_code_from_url(str(r.url))
                 if code:
-                    self._print("[OAuth] allow_redirect 命中 history URL code")
+                    logger.debug("allow_redirect 命中 history URL code", tag="OAuth")
                     return code
         except Exception as e:
             maybe_localhost = re.search(r'(https?://localhost[^\s\'\"]+)', str(e))
             if maybe_localhost:
                 code = _extract_code_from_url(maybe_localhost.group(1))
                 if code:
-                    self._print("[OAuth] allow_redirect 从 localhost 异常提取 code")
+                    logger.debug("allow_redirect 从 localhost 异常提取 code", tag="OAuth")
                     return code
-            self._print(f"[OAuth] allow_redirect 异常: {e}")
+            logger.debug(f"allow_redirect 异常: {e}", tag="OAuth")
 
         return None
 
     def _oauth_follow_for_code(self, start_url: str, referer: str = None, max_hops: int = 16):
-        from chatgpt_register import _extract_code_from_url, OAUTH_ISSUER
+        from main import _extract_code_from_url, OAUTH_ISSUER
         import re
         headers = {
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
@@ -427,13 +385,13 @@ class ChatGPTRegister:
                 if maybe_localhost:
                     code = _extract_code_from_url(maybe_localhost.group(1))
                     if code:
-                        self._print(f"[OAuth] follow[{hop + 1}] 命中 localhost 回调")
+                        logger.debug(f"follow[{hop + 1}] 命中 localhost 回调", tag="OAuth")
                         return code, maybe_localhost.group(1)
-                self._print(f"[OAuth] follow[{hop + 1}] 请求异常: {e}")
+                logger.debug(f"follow[{hop + 1}] 请求异常: {e}", tag="OAuth")
                 return None, last_url
 
             last_url = str(resp.url)
-            self._print(f"[OAuth] follow[{hop + 1}] {resp.status_code} {last_url[:140]}")
+            logger.debug(f"follow[{hop + 1}] {resp.status_code} {last_url[:140]}", tag="OAuth")
             code = _extract_code_from_url(last_url)
             if code:
                 return code, last_url
@@ -456,7 +414,7 @@ class ChatGPTRegister:
         return None, last_url
 
     def _oauth_submit_workspace_and_org(self, consent_url: str):
-        from chatgpt_register import _extract_code_from_url, OAUTH_ISSUER, _make_trace_headers
+        from main import _extract_code_from_url, OAUTH_ISSUER, _make_trace_headers
         session_data = self._decode_oauth_session_cookie()
         if not session_data:
             jar = getattr(self.session.cookies, "jar", None)
@@ -464,17 +422,17 @@ class ChatGPTRegister:
                 cookie_names = [getattr(c, "name", "") for c in list(jar)]
             else:
                 cookie_names = list(self.session.cookies.keys())
-            self._print(f"[OAuth] 无法解码 oai-client-auth-session, cookies={cookie_names[:12]}")
+            logger.debug(f"无法解码 oai-client-auth-session, cookies={cookie_names[:12]}", tag="OAuth")
             return None
 
         workspaces = session_data.get("workspaces", [])
         if not workspaces:
-            self._print("[OAuth] session 中没有 workspace 信息")
+            logger.debug("session 中没有 workspace 信息", tag="OAuth")
             return None
 
         workspace_id = (workspaces[0] or {}).get("id")
         if not workspace_id:
-            self._print("[OAuth] workspace_id 为空")
+            logger.debug("workspace_id 为空", tag="OAuth")
             return None
 
         h = {
@@ -495,7 +453,7 @@ class ChatGPTRegister:
             timeout=30,
             impersonate=self.impersonate,
         )
-        self._print(f"[OAuth] workspace/select -> {resp.status_code}")
+        logger.debug(f"workspace/select -> {resp.status_code}", tag="OAuth")
 
         if resp.status_code in (301, 302, 303, 307, 308):
             loc = resp.headers.get("Location", "")
@@ -510,19 +468,19 @@ class ChatGPTRegister:
             return code
 
         if resp.status_code != 200:
-            self._print(f"[OAuth] workspace/select 失败: {resp.status_code}")
+            logger.debug(f"workspace/select 失败: {resp.status_code}", tag="OAuth")
             return None
 
         try:
             ws_data = resp.json()
         except Exception:
-            self._print("[OAuth] workspace/select 响应不是 JSON")
+            logger.debug("workspace/select 响应不是 JSON", tag="OAuth")
             return None
 
         ws_next = ws_data.get("continue_url", "")
         orgs = ws_data.get("data", {}).get("orgs", [])
         ws_page = (ws_data.get("page") or {}).get("type", "")
-        self._print(f"[OAuth] workspace/select page={ws_page or '-'} next={(ws_next or '-')[:140]}")
+        logger.debug(f"workspace/select page={ws_page or '-'} next={(ws_next or '-')[:140]}", tag="OAuth")
 
         org_id = None
         project_id = None
@@ -549,7 +507,7 @@ class ChatGPTRegister:
                 timeout=30,
                 impersonate=self.impersonate,
             )
-            self._print(f"[OAuth] organization/select -> {resp_org.status_code}")
+            logger.debug(f"organization/select -> {resp_org.status_code}", tag="OAuth")
             if resp_org.status_code in (301, 302, 303, 307, 308):
                 loc = resp_org.headers.get("Location", "")
                 if loc.startswith("/"):
@@ -566,12 +524,12 @@ class ChatGPTRegister:
                 try:
                     org_data = resp_org.json()
                 except Exception:
-                    self._print("[OAuth] organization/select 响应不是 JSON")
+                    logger.debug("organization/select 响应不是 JSON", tag="OAuth")
                     return None
 
                 org_next = org_data.get("continue_url", "")
                 org_page = (org_data.get("page") or {}).get("type", "")
-                self._print(f"[OAuth] organization/select page={org_page or '-'} next={(org_next or '-')[:140]}")
+                logger.debug(f"organization/select page={org_page or '-'} next={(org_next or '-')[:140]}", tag="OAuth")
                 if org_next:
                     if org_next.startswith("/"):
                         org_next = f"{OAUTH_ISSUER}{org_next}"
@@ -591,13 +549,13 @@ class ChatGPTRegister:
         return None
 
     def perform_codex_oauth_login_http(self, email: str, password: str, mail_token: str = None):
-        from chatgpt_register import (_generate_pkce, OAUTH_CLIENT_ID, OAUTH_REDIRECT_URI, OAUTH_ISSUER,
+        from main import (_generate_pkce, OAUTH_CLIENT_ID, OAUTH_REDIRECT_URI, OAUTH_ISSUER,
                                       _make_trace_headers, build_sentinel_token, _wait_for_verification_email_impl,
                                       FREEMAIL_WORKER_DOMAIN, FREEMAIL_TOKEN, _extract_code_from_url)
         import secrets
         import time
         from urllib.parse import urlencode
-        self._print("[OAuth] 开始执行 Codex OAuth 纯协议流程...")
+        logger.info("开始执行 Codex OAuth 纯协议流程...", tag=self.tag)
 
         # 兼容两种 domain 形式，确保 auth 域也带 oai-did
         self.session.cookies.set("oai-did", self.device_id, domain=".auth.openai.com")
@@ -630,7 +588,7 @@ class ChatGPTRegister:
             return h
 
         def _bootstrap_oauth_session():
-            self._print("[OAuth] 1/7 GET /oauth/authorize")
+            logger.debug("1/7 GET /oauth/authorize", tag="OAuth")
             try:
                 r = self.session.get(
                     authorize_url,
@@ -645,18 +603,18 @@ class ChatGPTRegister:
                     impersonate=self.impersonate,
                 )
             except Exception as e:
-                self._print(f"[OAuth] /oauth/authorize 异常: {e}")
+                logger.debug(f"/oauth/authorize 异常: {e}", tag="OAuth")
                 return False, ""
 
             final_url = str(r.url)
             redirects = len(getattr(r, "history", []) or [])
-            self._print(f"[OAuth] /oauth/authorize -> {r.status_code}, final={(final_url or '-')[:140]}, redirects={redirects}")
+            logger.debug(f"/oauth/authorize -> {r.status_code}, final={(final_url or '-')[:140]}, redirects={redirects}", tag="OAuth")
 
             has_login = any(getattr(c, "name", "") == "login_session" for c in self.session.cookies)
-            self._print(f"[OAuth] login_session: {'已获取' if has_login else '未获取'}")
+            logger.debug(f"login_session: {'已获取' if has_login else '未获取'}", tag="OAuth")
 
             if not has_login:
-                self._print("[OAuth] 未拿到 login_session，尝试访问 oauth2 auth 入口")
+                logger.debug("未拿到 login_session，尝试访问 oauth2 auth 入口", tag="OAuth")
                 oauth2_url = f"{OAUTH_ISSUER}/api/oauth/oauth2/auth"
                 try:
                     r2 = self.session.get(
@@ -674,12 +632,12 @@ class ChatGPTRegister:
                     )
                     final_url = str(r2.url)
                     redirects2 = len(getattr(r2, "history", []) or [])
-                    self._print(f"[OAuth] /api/oauth/oauth2/auth -> {r2.status_code}, final={(final_url or '-')[:140]}, redirects={redirects2}")
+                    logger.debug(f"/api/oauth/oauth2/auth -> {r2.status_code}, final={(final_url or '-')[:140]}, redirects={redirects2}", tag="OAuth")
                 except Exception as e:
-                    self._print(f"[OAuth] /api/oauth/oauth2/auth 异常: {e}")
+                    logger.debug(f"/api/oauth/oauth2/auth 异常: {e}", tag="OAuth")
 
                 has_login = any(getattr(c, "name", "") == "login_session" for c in self.session.cookies)
-                self._print(f"[OAuth] login_session(重试): {'已获取' if has_login else '未获取'}")
+                logger.debug(f"login_session(重试): {'已获取' if has_login else '未获取'}", tag="OAuth")
 
             return has_login, final_url
 
@@ -693,7 +651,7 @@ class ChatGPTRegister:
                 impersonate=self.impersonate,
             )
             if not sentinel_authorize:
-                self._print("[OAuth] authorize_continue 的 sentinel token 获取失败")
+                logger.debug("authorize_continue 的 sentinel token 获取失败", tag="OAuth")
                 return None
 
             headers_continue = _oauth_json_headers(referer_url)
@@ -709,7 +667,7 @@ class ChatGPTRegister:
                     impersonate=self.impersonate,
                 )
             except Exception as e:
-                self._print(f"[OAuth] authorize/continue 异常: {e}")
+                logger.debug(f"authorize/continue 异常: {e}", tag="OAuth")
                 return None
 
         has_login_session, authorize_final_url = _bootstrap_oauth_session()
@@ -718,14 +676,14 @@ class ChatGPTRegister:
 
         continue_referer = authorize_final_url if authorize_final_url.startswith(OAUTH_ISSUER) else f"{OAUTH_ISSUER}/log-in"
 
-        self._print("[OAuth] 2/7 POST /api/accounts/authorize/continue")
+        logger.debug("2/7 POST /api/accounts/authorize/continue", tag="OAuth")
         resp_continue = _post_authorize_continue(continue_referer)
         if resp_continue is None:
             return None
 
-        self._print(f"[OAuth] /authorize/continue -> {resp_continue.status_code}")
+        logger.debug(f"/authorize/continue -> {resp_continue.status_code}", tag="OAuth")
         if resp_continue.status_code == 400 and "invalid_auth_step" in (resp_continue.text or ""):
-            self._print("[OAuth] invalid_auth_step，重新 bootstrap 后重试一次")
+            logger.debug("invalid_auth_step，重新 bootstrap 后重试一次", tag="OAuth")
             has_login_session, authorize_final_url = _bootstrap_oauth_session()
             if not authorize_final_url:
                 return None
@@ -733,23 +691,23 @@ class ChatGPTRegister:
             resp_continue = _post_authorize_continue(continue_referer)
             if resp_continue is None:
                 return None
-            self._print(f"[OAuth] /authorize/continue(重试) -> {resp_continue.status_code}")
+            logger.debug(f"/authorize/continue(重试) -> {resp_continue.status_code}", tag="OAuth")
 
         if resp_continue.status_code != 200:
-            self._print(f"[OAuth] 邮箱提交失败: {resp_continue.text[:180]}")
+            logger.debug(f"邮箱提交失败: {resp_continue.text[:180]}", tag="OAuth")
             return None
 
         try:
             continue_data = resp_continue.json()
         except Exception:
-            self._print("[OAuth] authorize/continue 响应解析失败")
+            logger.debug("authorize/continue 响应解析失败", tag="OAuth")
             return None
 
         continue_url = continue_data.get("continue_url", "")
         page_type = (continue_data.get("page") or {}).get("type", "")
-        self._print(f"[OAuth] continue page={page_type or '-'} next={(continue_url or '-')[:140]}")
+        logger.debug(f"continue page={page_type or '-'} next={(continue_url or '-')[:140]}", tag="OAuth")
 
-        self._print("[OAuth] 3/7 POST /api/accounts/password/verify")
+        logger.debug("3/7 POST /api/accounts/password/verify", tag="OAuth")
         sentinel_pwd = build_sentinel_token(
             self.session,
             self.device_id,
@@ -759,7 +717,7 @@ class ChatGPTRegister:
             impersonate=self.impersonate,
         )
         if not sentinel_pwd:
-            self._print("[OAuth] password_verify 的 sentinel token 获取失败")
+            logger.debug("password_verify 的 sentinel token 获取失败", tag="OAuth")
             return None
 
         headers_verify = _oauth_json_headers(f"{OAUTH_ISSUER}/log-in/password")
@@ -775,23 +733,23 @@ class ChatGPTRegister:
                 impersonate=self.impersonate,
             )
         except Exception as e:
-            self._print(f"[OAuth] password/verify 异常: {e}")
+            logger.debug(f"password/verify 异常: {e}", tag="OAuth")
             return None
 
-        self._print(f"[OAuth] /password/verify -> {resp_verify.status_code}")
+        logger.debug(f"/password/verify -> {resp_verify.status_code}", tag="OAuth")
         if resp_verify.status_code != 200:
-            self._print(f"[OAuth] 密码校验失败: {resp_verify.text[:180]}")
+            logger.debug(f"密码校验失败: {resp_verify.text[:180]}", tag="OAuth")
             return None
 
         try:
             verify_data = resp_verify.json()
         except Exception:
-            self._print("[OAuth] password/verify 响应解析失败")
+            logger.debug("password/verify 响应解析失败", tag="OAuth")
             return None
 
         continue_url = verify_data.get("continue_url", "") or continue_url
         page_type = (verify_data.get("page") or {}).get("type", "") or page_type
-        self._print(f"[OAuth] verify page={page_type or '-'} next={(continue_url or '-')[:140]}")
+        logger.debug(f"verify page={page_type or '-'} next={(continue_url or '-')[:140]}", tag="OAuth")
 
         need_oauth_otp = (
             page_type == "email_otp_verification"
@@ -800,9 +758,9 @@ class ChatGPTRegister:
         )
 
         if need_oauth_otp:
-            self._print("[OAuth] 4/7 检测到邮箱 OTP 验证")
+            logger.debug("4/7 检测到邮箱 OTP 验证", tag="OAuth")
             if not mail_token:
-                self._print("[OAuth] OAuth 阶段需要邮箱 OTP，但未提供 mail_token")
+                logger.debug("OAuth 阶段需要邮箱 OTP，但未提供 mail_token", tag="OAuth")
                 return None
 
             headers_otp = _oauth_json_headers(f"{OAUTH_ISSUER}/email-verification")
@@ -820,12 +778,12 @@ class ChatGPTRegister:
                         proxy=self.proxy, freemail_worker_domain=FREEMAIL_WORKER_DOMAIN, freemail_token=FREEMAIL_TOKEN
                     )
                 except Exception as e:
-                    self._print(f"[OAuth] 等待验证码时出错: {e}")
+                    logger.debug(f"等待验证码时出错: {e}", tag="OAuth")
                     code = None
 
                 if not code:
                     elapsed = int(120 - max(0, otp_deadline - time.time()))
-                    self._print(f"[OAuth] OTP 等待中... ({elapsed}s/120s)")
+                    logger.debug(f"OTP 等待中... ({elapsed}s/120s)", tag="OAuth")
                     time.sleep(2)
                     continue
 
@@ -833,7 +791,7 @@ class ChatGPTRegister:
                     continue
 
                 tried_codes.add(code)
-                self._print(f"[OAuth] 尝试 OTP: {code}")
+                logger.debug(f"尝试 OTP: {code}", tag="OAuth")
                 try:
                     resp_otp = self.session.post(
                         f"{OAUTH_ISSUER}/api/accounts/email-otp/validate",
@@ -844,28 +802,28 @@ class ChatGPTRegister:
                         impersonate=self.impersonate,
                     )
                 except Exception as e:
-                    self._print(f"[OAuth] email-otp/validate 异常: {e}")
+                    logger.debug(f"email-otp/validate 异常: {e}", tag="OAuth")
                     continue
 
-                self._print(f"[OAuth] /email-otp/validate -> {resp_otp.status_code}")
+                logger.debug(f"/email-otp/validate -> {resp_otp.status_code}", tag="OAuth")
                 if resp_otp.status_code != 200:
-                    self._print(f"[OAuth] OTP 无效，继续尝试下一条: {resp_otp.text[:160]}")
+                    logger.debug(f"OTP 无效，继续尝试下一条: {resp_otp.text[:160]}", tag="OAuth")
                     continue
 
                 try:
                     otp_data = resp_otp.json()
                 except Exception:
-                    self._print("[OAuth] email-otp/validate 响应解析失败")
+                    logger.debug("email-otp/validate 响应解析失败", tag="OAuth")
                     continue
 
                 continue_url = otp_data.get("continue_url", "") or continue_url
                 page_type = (otp_data.get("page") or {}).get("type", "") or page_type
-                self._print(f"[OAuth] OTP 验证通过 page={page_type or '-'} next={(continue_url or '-')[:140]}")
+                logger.debug(f"OTP 验证通过 page={page_type or '-'} next={(continue_url or '-')[:140]}", tag="OAuth")
                 otp_success = True
                 break
 
             if not otp_success:
-                self._print(f"[OAuth] OAuth 阶段 OTP 验证失败，已尝试 {len(tried_codes)} 个验证码")
+                logger.debug(f"OAuth 阶段 OTP 验证失败，已尝试 {len(tried_codes)} 个验证码", tag="OAuth")
                 return None
 
         code = None
@@ -880,7 +838,7 @@ class ChatGPTRegister:
             code = _extract_code_from_url(consent_url)
 
         if not code and consent_url:
-            self._print("[OAuth] 5/7 跟随 continue_url 提取 code")
+            logger.debug("5/7 跟随 continue_url 提取 code", tag="OAuth")
             code, _ = self._oauth_follow_for_code(consent_url, referer=f"{OAUTH_ISSUER}/log-in/password")
 
         consent_hint = (
@@ -895,21 +853,21 @@ class ChatGPTRegister:
         if not code and consent_hint:
             if not consent_url:
                 consent_url = f"{OAUTH_ISSUER}/sign-in-with-chatgpt/codex/consent"
-            self._print("[OAuth] 6/7 执行 workspace/org 选择")
+            logger.debug("6/7 执行 workspace/org 选择", tag="OAuth")
             code = self._oauth_submit_workspace_and_org(consent_url)
 
         if not code:
             fallback_consent = f"{OAUTH_ISSUER}/sign-in-with-chatgpt/codex/consent"
-            self._print("[OAuth] 6/7 回退 consent 路径重试")
+            logger.debug("6/7 回退 consent 路径重试", tag="OAuth")
             code = self._oauth_submit_workspace_and_org(fallback_consent)
             if not code:
                 code, _ = self._oauth_follow_for_code(fallback_consent, referer=f"{OAUTH_ISSUER}/log-in/password")
 
         if not code:
-            self._print("[OAuth] 未获取到 authorization code")
+            logger.debug("未获取到 authorization code", tag="OAuth")
             return None
 
-        self._print("[OAuth] 7/7 POST /oauth/token")
+        logger.debug("7/7 POST /oauth/token", tag="OAuth")
         token_resp = self.session.post(
             f"{OAUTH_ISSUER}/oauth/token",
             headers={"Content-Type": "application/x-www-form-urlencoded", "User-Agent": self.ua},
@@ -923,21 +881,21 @@ class ChatGPTRegister:
             timeout=60,
             impersonate=self.impersonate,
         )
-        self._print(f"[OAuth] /oauth/token -> {token_resp.status_code}")
+        logger.debug(f"/oauth/token -> {token_resp.status_code}", tag="OAuth")
 
         if token_resp.status_code != 200:
-            self._print(f"[OAuth] token 交换失败: {token_resp.status_code} {token_resp.text[:200]}")
+            logger.debug(f"token 交换失败: {token_resp.status_code} {token_resp.text[:200]}", tag="OAuth")
             return None
 
         try:
             data = token_resp.json()
         except Exception:
-            self._print("[OAuth] token 响应解析失败")
+            logger.debug("token 响应解析失败", tag="OAuth")
             return None
 
         if not data.get("access_token"):
-            self._print("[OAuth] token 响应缺少 access_token")
+            logger.debug("token 响应缺少 access_token", tag="OAuth")
             return None
 
-        self._print("[OAuth] Codex Token 获取成功")
+        logger.info("Codex Token 获取成功", tag=self.tag)
         return data
